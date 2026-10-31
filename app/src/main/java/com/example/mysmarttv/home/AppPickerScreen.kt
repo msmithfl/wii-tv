@@ -17,7 +17,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -51,6 +54,13 @@ fun AppPickerScreen(
             .filter { it.packageName !in store.packageNames && it.packageName != PLAY_STORE }
     }
     val firstApp = remember { FocusRequester() }
+    // When the page opens, Android first selects the Get More Apps button on its own, then the page moves the
+    // selection to the first tile. Both happen by themselves, so stay quiet until the first tile has been
+    // reached, and only play the sound for real moves after that.
+    var settled by remember { mutableStateOf(false) }
+    val onTileFocused = {
+        if (settled) sounds.playCardMove() else settled = true
+    }
 
     Column(
         modifier = Modifier
@@ -72,7 +82,12 @@ fun AppPickerScreen(
                     sounds.playAppSelect()
                     launchApp(context, PLAY_STORE)
                 },
-                modifier = Modifier.onFocusChanged { if (it.hasFocus) sounds.playCardMove() },
+                modifier = Modifier.onFocusChanged {
+                    if (it.hasFocus) {
+                        // With no tiles to move to, this button's first selection is the page opening.
+                        if (settled) sounds.playCardMove() else if (apps.isEmpty()) settled = true
+                    }
+                },
             )
         }
         Spacer(Modifier.height(2.dp))
@@ -96,7 +111,7 @@ fun AppPickerScreen(
                             store.set(slot, app.packageName)
                             onDone()
                         },
-                        onFocused = sounds::playCardMove,
+                        onFocused = onTileFocused,
                         modifier = Modifier
                             .height(110.dp)
                             .padding(4.dp)
