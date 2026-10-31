@@ -1,6 +1,13 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// The signing key's location and passwords, kept in signing/ (which git ignores) instead of in this file.
+val signingProps = Properties().apply {
+    rootProject.file("signing/keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
 }
 
 android {
@@ -18,8 +25,23 @@ android {
 
     }
 
+    signingConfigs {
+        create("mysmarttv") {
+            storeFile = rootProject.file(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
+        // Debug and release share one key, so either can install over the other on the TV without
+        // uninstalling, which would wipe the saved dashboard and settings.
+        debug {
+            signingConfig = signingConfigs.getByName("mysmarttv")
+        }
         release {
+            signingConfig = signingConfigs.getByName("mysmarttv")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
