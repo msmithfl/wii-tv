@@ -1,0 +1,252 @@
+package com.example.mysmarttv
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.mysmarttv.home.AppPickerScreen
+import com.example.mysmarttv.home.ChannelStore
+import com.example.mysmarttv.home.HomeScreen
+import com.example.mysmarttv.home.Sounds
+import com.example.mysmarttv.music.MusicPlayer
+import com.example.mysmarttv.music.MusicScreen
+import com.example.mysmarttv.news.NewsScreen
+import com.example.mysmarttv.screensaver.Screensaver
+import com.example.mysmarttv.settings.AppSettings
+import com.example.mysmarttv.settings.SettingsScreen
+import com.example.mysmarttv.ui.theme.MySmartTVTheme
+import com.example.mysmarttv.weather.WeatherScreen
+import com.example.mysmarttv.weather.WeatherStore
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private const val KEY_RESUME_MUSIC = "resume_music"
+
+class MainActivity : ComponentActivity() {
+    private lateinit var sounds: Sounds
+    private lateinit var channels: ChannelStore
+    private lateinit var appSettings: AppSettings
+    private val music = MusicPlayer()
+    private val weather = WeatherStore()
+
+    // Counts Home button presses while the app is already open, so the screens can close back to the dashboard.
+    private var homePresses by mutableIntStateOf(0)
+
+    // When a remote button was last pressed, for timing the screensaver.
+    private var lastInputAt = SystemClock.uptimeMillis()
+    private var screensaverShowing by mutableStateOf(false)
+    private var screensaverStartedAt = 0L
+
+    // Set once the screensaver has run for the "Sleep after" time, so the app stops holding the screen on.
+    private var tvMaySleep by mutableStateOf(false)
+
+    // Whether music was playing when you left for another app, so it can start again when you come back.
+    private var resumeMusic = false
+
+    private val requestMusicPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) music.loadTracks()
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        sounds = Sounds(this)
+        channels = ChannelStore(this)
+        appSettings = AppSettings(this)
+        // Only on a fresh launch, not when Android rebuilds the screen.
+        if (savedInstanceState == null) sounds.playStartup(then = ::playFirstSong)
+        resumeMusic = savedInstanceState?.getBoolean(KEY_RESUME_MUSIC) ?: false
+
+        // The songs live in the TV's Music folder, which needs permission to read.
+        if (checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            music.loadTracks()
+        } else {
+            requestMusicPermission.launch(Manifest.permission.READ_MEDIA_AUDIO)
+        }
+
+        // Fetches the forecast while the app is on screen: right away, then every half hour.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { weather.keepFresh() }
+        }
+
+        // Shows the screensaver once no button has been pressed for the chosen time, while the app is on screen.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                // Coming back from another app, or the TV waking from sleep, starts everything over.
+                wake()
+                while (true) {
+                    delay(1_000)
+                    val now = SystemClock.uptimeMillis()
+                    val screensaverDelayMs = appSettings.screensaverMinutes * 60_000L
+                    if (!screensaverShowing && screensaverDelayMs > 0 && now - lastInputAt >= screensaverDelayMs) {
+                        screensaverShowing = true
+                        screensaverStartedAt = now
+                    }
+                    // After the screensaver has run long enough, let go of the screen so Google's sleep can take over.
+                    val sleepDelayMs = appSettings.sleepAfterMinutes * 60_000L
+                    if (screensaverShowing && sleepDelayMs > 0 && now - screensaverStartedAt >= sleepDelayMs) {
+                        tvMaySleep = true
+                    }
+                }
+            }
+        }
+
+        setContent {
+            // While our screensaver is on, keep Google's own screensaver and sleep from taking over first,
+            // until the "Sleep after" time has passed.
+            val holdScreenOn = appSettings.screensaverMinutes > 0 && !tvMaySleep
+            LaunchedEffect(holdScreenOn) {
+                if (holdScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            MySmartTVTheme(isInDarkTheme = appSettings.darkMode) {
+                Box {
+                    var showMusic by rememberSaveable { mutableStateOf(false) }
+                    var showWeather by rememberSaveable { mutableStateOf(false) }
+                    var showSettings by rememberSaveable { mutableStateOf(false) }
+                    var showNews by rememberSaveable { mutableStateOf(false) }
+                    // The dashboard slot an app is being picked for, or -1 when not picking.
+                    var pickingSlot by rememberSaveable { mutableIntStateOf(-1) }
+                    // Which slot is selected when the home screen comes back, so it returns to where you were.
+                    var homeSlot by rememberSaveable { mutableIntStateOf(0) }
+                    // Home always lands on the dashboard, from music, weather or the app picker.
+                    LaunchedEffect(homePresses) {
+                        showMusic = false
+                        showWeather = false
+                        showSettings = false
+                        showNews = false
+                        pickingSlot = -1
+                    }
+                    when {
+                        showMusic -> MusicScreen(player = music, sounds = sounds, onBack = {
+                            sounds.playBack()
+                            showMusic = false
+                        })
+                        showSettings -> SettingsScreen(settings = appSettings, sounds = sounds, onBack = {
+                            sounds.playBack()
+                            showSettings = false
+                        })
+                        showWeather -> WeatherScreen(store = weather, sounds = sounds, onBack = {
+                            sounds.playBack()
+                            showWeather = false
+                        })
+                        showNews -> NewsScreen(onBack = {
+                            sounds.playBack()
+                            showNews = false
+                        })
+                        pickingSlot >= 0 -> AppPickerScreen(
+                            slot = pickingSlot,
+                            store = channels,
+                            sounds = sounds,
+                            onDone = { pickingSlot = -1 },
+                        )
+                        else -> HomeScreen(
+                            store = channels,
+                            sounds = sounds,
+                            onOpenMusic = {
+                                // Re-read the folder so newly copied songs show up.
+                                music.loadTracks()
+                                showMusic = true
+                            },
+                            musicMuted = music.isMuted,
+                            onToggleMute = music::toggleMute,
+                            weather = weather,
+                            onOpenWeather = {
+                                showWeather = true
+                                homeSlot = it
+                            },
+                            onOpenNews = {
+                                showNews = true
+                                homeSlot = it
+                            },
+                            onAddApp = {
+                                pickingSlot = it
+                                homeSlot = it
+                            },
+                            onOpenSettings = { showSettings = true },
+                            startSlot = homeSlot,
+                        )
+                    }
+                    // Drawn over whatever screen is open, so waking it lands back where you were.
+                    if (screensaverShowing) Screensaver()
+                }
+            }
+        }
+    }
+
+    // Every remote press restarts the screensaver timer. While the screensaver is showing, a press only wakes it,
+    // so it doesn't also act on the screen underneath.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        lastInputAt = SystemClock.uptimeMillis()
+        if (screensaverShowing) {
+            if (event.action == KeyEvent.ACTION_UP) wake()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun wake() {
+        screensaverShowing = false
+        tvMaySleep = false
+        lastInputAt = SystemClock.uptimeMillis()
+    }
+
+    // As the home screen, the app stays open; pressing Home sends it here instead of starting it again.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.hasCategory(Intent.CATEGORY_HOME)) {
+            homePresses++
+            wake()
+        }
+    }
+
+    // Skipped if you've already left the app, picked a song yourself, or there are no songs yet.
+    private fun playFirstSong() {
+        val onScreen = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        if (onScreen && music.currentIndex == null && music.tracks.isNotEmpty()) music.play(0)
+    }
+
+    // Music keeps playing on the home screen, but stops when you open another app.
+    // If it was playing when you left, it picks back up when you come back.
+    override fun onStop() {
+        super.onStop()
+        resumeMusic = music.isPlaying
+        music.pause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (resumeMusic) {
+            resumeMusic = false
+            music.resume()
+        }
+    }
+
+    // Android may close the app while you're in another one; this remembers to start the music again.
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_RESUME_MUSIC, resumeMusic || music.isPlaying)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        sounds.release()
+        music.release()
+    }
+}
