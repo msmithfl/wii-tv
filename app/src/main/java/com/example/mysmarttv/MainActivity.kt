@@ -27,6 +27,7 @@ import com.example.mysmarttv.home.Sounds
 import com.example.mysmarttv.music.MusicPlayer
 import com.example.mysmarttv.music.MusicScreen
 import com.example.mysmarttv.news.NewsScreen
+import com.example.mysmarttv.news.NewsStore
 import com.example.mysmarttv.screensaver.Screensaver
 import com.example.mysmarttv.settings.AppSettings
 import com.example.mysmarttv.settings.SettingsScreen
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var appSettings: AppSettings
     private val music = MusicPlayer()
     private val weather = WeatherStore()
+    private lateinit var news: NewsStore
 
     // Counts Home button presses while the app is already open, so the screens can close back to the dashboard.
     private var homePresses by mutableIntStateOf(0)
@@ -69,6 +71,7 @@ class MainActivity : ComponentActivity() {
         sounds = Sounds(this)
         channels = ChannelStore(this)
         appSettings = AppSettings(this)
+        news = NewsStore(this)
         // Only on a fresh launch, not when Android rebuilds the screen.
         if (savedInstanceState == null) sounds.playStartup(then = ::playFirstSong)
         resumeMusic = savedInstanceState?.getBoolean(KEY_RESUME_MUSIC) ?: false
@@ -83,6 +86,10 @@ class MainActivity : ComponentActivity() {
         // Fetches the forecast while the app is on screen: right away, then every half hour.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) { weather.keepFresh() }
+        }
+        // The same for the news, every 20 minutes.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { news.keepFresh() }
         }
 
         // Shows the screensaver once no button has been pressed for the chosen time, while the app is on screen.
@@ -146,7 +153,7 @@ class MainActivity : ComponentActivity() {
                             sounds.playBack()
                             showWeather = false
                         })
-                        showNews -> NewsScreen(onBack = {
+                        showNews -> NewsScreen(store = news, settings = appSettings, sounds = sounds, onBack = {
                             sounds.playBack()
                             showNews = false
                         })
@@ -171,6 +178,8 @@ class MainActivity : ComponentActivity() {
                                 showWeather = true
                                 homeSlot = it
                             },
+                            news = news,
+                            newsHeadlines = appSettings.newsCardHeadlines,
                             onOpenNews = {
                                 showNews = true
                                 homeSlot = it

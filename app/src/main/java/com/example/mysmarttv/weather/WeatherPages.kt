@@ -27,13 +27,14 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Text
+import com.example.mysmarttv.ui.theme.WiiFont
 import java.time.DayOfWeek
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle as DayNameStyle
 import java.util.Locale
 
 // White text on the blue panel gets a soft drop shadow so it stands off the gradient.
-internal val ShadowedText = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.55f), Offset(2f, 3f), 4f))
+internal val ShadowedText = TextStyle(fontFamily = WiiFont, shadow = Shadow(Color.Black.copy(alpha = 0.55f), Offset(2f, 3f), 4f))
 
 private val HighYellow = Color(0xFFFFC61A)
 private val LowCyan = Color(0xFF8AF3F0)

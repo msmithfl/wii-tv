@@ -27,6 +27,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.mysmarttv.news.NewsStore
+import com.example.mysmarttv.news.NewsTile
 import com.example.mysmarttv.ui.theme.wiiBackdrop
 import com.example.mysmarttv.weather.ForecastTile
 import com.example.mysmarttv.weather.WeatherStore
@@ -53,6 +55,8 @@ fun HomeScreen(
     onToggleMute: () -> Unit,
     weather: WeatherStore,
     onOpenWeather: (slot: Int) -> Unit,
+    news: NewsStore,
+    newsHeadlines: Boolean,
     onOpenNews: (slot: Int) -> Unit,
     onAddApp: (slot: Int) -> Unit,
     onOpenSettings: () -> Unit,
@@ -153,8 +157,9 @@ fun HomeScreen(
                                     modifier = tileModifier,
                                 )
                             } else if (channel.packageName == NEWS_ID) {
-                                ChannelTile(
-                                    channel = channel,
+                                NewsTile(
+                                    store = news,
+                                    showHeadlines = newsHeadlines,
                                     onClick = {
                                         sounds.playAppSelect()
                                         onOpenNews(slot)

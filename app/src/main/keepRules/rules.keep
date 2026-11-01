@@ -10,3 +10,5 @@
 #-keepclassmembers class fqcn.of.javascript.interface.for.webview {
 #   public *;
 #}
+# jsoup can use the optional re2j regex library, which this app does not include.
+-dontwarn com.google.re2j.**
