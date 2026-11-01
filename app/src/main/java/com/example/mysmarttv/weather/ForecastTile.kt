@@ -55,7 +55,8 @@ fun ForecastTile(
                 modifier = Modifier
                     .weight(1f - TitleShare)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
+                    // More room on the right than the left nudges the centered weather a little left.
+                    .padding(start = 12.dp, end = 28.dp),
             ) {
                 if (weather == null) {
                     Text(

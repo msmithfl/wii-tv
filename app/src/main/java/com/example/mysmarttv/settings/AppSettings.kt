@@ -5,11 +5,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.example.mysmarttv.screensaver.PictureSource
 
 private const val PREFS_NAME = "settings"
 private const val DARK_MODE_KEY = "dark_mode"
 private const val SCREENSAVER_KEY = "screensaver_minutes"
 private const val SLEEP_AFTER_KEY = "sleep_after_minutes"
+private const val SCREENSAVER_PICTURES_KEY = "screensaver_pictures"
 private const val NEWS_CARD_HEADLINES_KEY = "news_card_headlines"
 private const val NEWS_TEXT_SIZE_KEY = "news_text_size"
 
@@ -56,6 +58,18 @@ class AppSettings(context: Context) {
     fun changeNewsTextSize(step: Int) {
         newsTextSize = (newsTextSize + step).coerceIn(NEWS_TEXT_SIZES.indices)
         prefs.edit().putInt(NEWS_TEXT_SIZE_KEY, newsTextSize).apply()
+    }
+
+    // Where the screensaver's pictures come from.
+    var screensaverPictures by mutableStateOf(
+        PictureSource.entries.firstOrNull { it.name == prefs.getString(SCREENSAVER_PICTURES_KEY, null) } ?: PictureSource.Nasa
+    )
+        private set
+
+    /** Steps to the next picture source: NASA, then the Met, then both, then back to NASA. */
+    fun nextScreensaverPictures() {
+        screensaverPictures = PictureSource.entries[(screensaverPictures.ordinal + 1) % PictureSource.entries.size]
+        prefs.edit().putString(SCREENSAVER_PICTURES_KEY, screensaverPictures.name).apply()
     }
 
     fun toggleDarkMode() {

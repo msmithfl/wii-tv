@@ -27,6 +27,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.mysmarttv.museum.MuseumStore
+import com.example.mysmarttv.museum.MuseumTile
 import com.example.mysmarttv.news.NewsStore
 import com.example.mysmarttv.news.NewsTile
 import com.example.mysmarttv.ui.theme.wiiBackdrop
@@ -46,11 +48,19 @@ private val TileGap = 6.dp
 // Wide cards, about twice as wide as they are tall.
 private const val TILE_HEIGHT_RATIO = 0.5f
 
+// Stand-ins for a slot number in startSlot, meaning the selection goes back to a corner button.
+const val SETTINGS_BUTTON = -1
+const val MUSIC_BUTTON = -2
+
+/**
+ * The dashboard. [startSlot] is what's selected when it opens: a slot, or [SETTINGS_BUTTON] or [MUSIC_BUTTON].
+ * [startPage] is the page shown when a corner button is selected, since those sit under either page.
+ */
 @Composable
 fun HomeScreen(
     store: ChannelStore,
     sounds: Sounds,
-    onOpenMusic: () -> Unit,
+    onOpenMusic: (page: Int) -> Unit,
     musicMuted: Boolean,
     onToggleMute: () -> Unit,
     weather: WeatherStore,
@@ -58,9 +68,12 @@ fun HomeScreen(
     news: NewsStore,
     newsHeadlines: Boolean,
     onOpenNews: (slot: Int) -> Unit,
+    museum: MuseumStore,
+    onOpenMuseum: (slot: Int) -> Unit,
     onAddApp: (slot: Int) -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenSettings: (page: Int) -> Unit,
     startSlot: Int = 0,
+    startPage: Int = 0,
 ) {
     // The dashboard is the TV's home screen, so there's nothing behind it for Back to go to.
     BackHandler {}
@@ -72,7 +85,7 @@ fun HomeScreen(
     var refocusSlot by remember { mutableIntStateOf(-1) }
     // The slot whose remove dialog is open, or -1.
     var removingSlot by remember { mutableIntStateOf(-1) }
-    // The first tile gets focus on its own when the screen opens; only play the sound for real moves.
+    // The first tile or button gets focus on its own when the screen opens; only play the sound for real moves.
     var initialFocus by remember { mutableStateOf(true) }
     // Briefly true after the remove dialog closes, so the selection settling back on the slot stays quiet.
     var quietRefocus by remember { mutableStateOf(false) }
@@ -83,7 +96,7 @@ fun HomeScreen(
         }
     }
     // Follows the selection: moving onto a tile from the other page slides the strip over.
-    var page by remember { mutableIntStateOf(startSlot / PAGE_SIZE) }
+    var page by remember { mutableIntStateOf(if (startSlot >= 0) startSlot / PAGE_SIZE else startPage) }
 
     Column(
         modifier = Modifier
@@ -168,6 +181,17 @@ fun HomeScreen(
                                     onFocused = onFocused,
                                     modifier = tileModifier,
                                 )
+                            } else if (channel.packageName == MUSEUM_ID) {
+                                MuseumTile(
+                                    store = museum,
+                                    onClick = {
+                                        sounds.playAppSelect()
+                                        onOpenMuseum(slot)
+                                    },
+                                    onLongClick = { removingSlot = slot },
+                                    onFocused = onFocused,
+                                    modifier = tileModifier,
+                                )
                             } else {
                                 ChannelTile(
                                     channel = channel,
@@ -189,18 +213,19 @@ fun HomeScreen(
         ClockBar(
             onSettingsClick = {
                 sounds.playOpenMenu()
-                onOpenSettings()
+                onOpenSettings(page)
             },
             onMusicClick = {
                 sounds.playOpenMenu()
-                onOpenMusic()
+                onOpenMusic(page)
             },
             onMusicLongClick = {
                 sounds.playAppSelect()
                 onToggleMute()
             },
             musicMuted = musicMuted,
-            onButtonFocused = { sounds.playCardMove() },
+            // Shares the tiles' quiet first focus, so coming back onto a button doesn't click.
+            onButtonFocused = onTileFocused,
             settingsFocus = settingsFocus,
             musicFocus = musicFocus,
             // Up from a corner button goes to the bottom card on that side of the page you're on, rather than
@@ -234,7 +259,13 @@ fun HomeScreen(
         )
     }
 
-    LaunchedEffect(Unit) { tileFocus[startSlot].requestFocus() }
+    LaunchedEffect(Unit) {
+        when (startSlot) {
+            SETTINGS_BUTTON -> settingsFocus.requestFocus()
+            MUSIC_BUTTON -> musicFocus.requestFocus()
+            else -> tileFocus[startSlot].requestFocus()
+        }
+    }
     LaunchedEffect(refocusSlot) {
         if (refocusSlot >= 0) {
             tileFocus[refocusSlot].requestFocus()

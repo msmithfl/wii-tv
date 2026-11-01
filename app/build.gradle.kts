@@ -10,6 +10,11 @@ val signingProps = Properties().apply {
     rootProject.file("signing/keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
 }
 
+// API keys, kept in secrets.properties (which git ignores) instead of in this file.
+val secrets = Properties().apply {
+    rootProject.file("secrets.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+
 android {
     namespace = "com.example.mysmarttv"
     compileSdk {
@@ -23,6 +28,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // For the screensaver's space pictures. Without a key, NASA's shared demo key works but runs out quickly.
+        buildConfigField("String", "NASA_API_KEY", "\"${secrets.getProperty("nasaApiKey", "DEMO_KEY")}\"")
     }
 
     signingConfigs {
@@ -54,6 +61,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -18,3 +18,5 @@ local.properties
 /signing/
 # The music files (about 80 MB). They live on the TV, not in the app.
 /sound-library/
+# API keys.
+/secrets.properties

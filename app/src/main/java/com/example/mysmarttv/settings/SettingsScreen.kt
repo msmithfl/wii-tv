@@ -89,6 +89,15 @@ fun SettingsScreen(settings: AppSettings, sounds: Sounds, onBack: () -> Unit) {
                 },
                 onFocused = onRowFocused,
             )
+            SettingRow(
+                label = "Screensaver pictures",
+                value = settings.screensaverPictures.label,
+                onClick = {
+                    sounds.playAppSelect()
+                    settings.nextScreensaverPictures()
+                },
+                onFocused = onRowFocused,
+            )
             // How long the screensaver runs before the TV may go to sleep.
             SettingRow(
                 label = "Sleep after screensaver",

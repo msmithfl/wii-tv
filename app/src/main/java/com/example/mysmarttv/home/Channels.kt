@@ -20,8 +20,11 @@ val WeatherChannel = Channel("Forecast Channel", WEATHER_ID)
 const val NEWS_ID = "@news"
 val NewsChannel = Channel("News Channel", NEWS_ID)
 
+const val MUSEUM_ID = "@museum"
+val MuseumChannel = Channel("Museum Channel", MUSEUM_ID)
+
 /** The channels built into MySmartTV itself, offered alongside the TV's installed apps. */
-val BuiltInChannels = listOf(WeatherChannel, NewsChannel)
+val BuiltInChannels = listOf(WeatherChannel, NewsChannel, MuseumChannel)
 
 // What the dashboard starts with before anything is added or removed.
 private val defaultPackages = listOf(

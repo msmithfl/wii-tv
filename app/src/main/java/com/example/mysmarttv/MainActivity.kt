@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,12 +25,18 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.example.mysmarttv.home.AppPickerScreen
 import com.example.mysmarttv.home.ChannelStore
 import com.example.mysmarttv.home.HomeScreen
+import com.example.mysmarttv.home.MUSIC_BUTTON
+import com.example.mysmarttv.home.SETTINGS_BUTTON
 import com.example.mysmarttv.home.Sounds
 import com.example.mysmarttv.music.MusicPlayer
 import com.example.mysmarttv.music.MusicScreen
+import com.example.mysmarttv.museum.Artwork
+import com.example.mysmarttv.museum.MuseumScreen
+import com.example.mysmarttv.museum.MuseumStore
 import com.example.mysmarttv.news.NewsScreen
 import com.example.mysmarttv.news.NewsStore
 import com.example.mysmarttv.screensaver.Screensaver
+import com.example.mysmarttv.screensaver.ScreensaverPictures
 import com.example.mysmarttv.settings.AppSettings
 import com.example.mysmarttv.settings.SettingsScreen
 import com.example.mysmarttv.ui.theme.MySmartTVTheme
@@ -39,6 +47,9 @@ import kotlinx.coroutines.launch
 
 private const val KEY_RESUME_MUSIC = "resume_music"
 
+// The remote's OK button, which different remotes send as different keys.
+private val OK_KEYS = setOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A)
+
 class MainActivity : ComponentActivity() {
     private lateinit var sounds: Sounds
     private lateinit var channels: ChannelStore
@@ -46,6 +57,13 @@ class MainActivity : ComponentActivity() {
     private val music = MusicPlayer()
     private val weather = WeatherStore()
     private lateinit var news: NewsStore
+    private val screensaverPictures = ScreensaverPictures { appSettings.screensaverPictures }
+    private val museum = MuseumStore()
+
+    // Set when OK is held on a painting in the screensaver, to open it in the Museum Channel.
+    private var artworkToOpen by mutableStateOf<Artwork?>(null)
+    // After that hold, the rest of the press (its repeats and release) is ignored, so it doesn't also act on the screen.
+    private var ignoreUntilRelease = false
 
     // Counts Home button presses while the app is already open, so the screens can close back to the dashboard.
     private var homePresses by mutableIntStateOf(0)
@@ -91,6 +109,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) { news.keepFresh() }
         }
+        // The same for the Museum Channel's artwork of the day.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { museum.keepFresh() }
+        }
+        // Downloads the screensaver's first picture ahead, so it shows the moment the screensaver starts.
+        lifecycleScope.launch { screensaverPictures.prepare() }
 
         // Shows the screensaver once no button has been pressed for the chosen time, while the app is on screen.
         lifecycleScope.launch {
@@ -128,17 +152,37 @@ class MainActivity : ComponentActivity() {
                     var showWeather by rememberSaveable { mutableStateOf(false) }
                     var showSettings by rememberSaveable { mutableStateOf(false) }
                     var showNews by rememberSaveable { mutableStateOf(false) }
+                    var showMuseum by rememberSaveable { mutableStateOf(false) }
+                    // A piece to open the Museum Channel straight to, from the screensaver. Each one counts as a
+                    // fresh visit, so the channel starts over at that piece even if it was already open.
+                    var museumStart by remember { mutableStateOf<Artwork?>(null) }
+                    var museumVisit by remember { mutableIntStateOf(0) }
                     // The dashboard slot an app is being picked for, or -1 when not picking.
                     var pickingSlot by rememberSaveable { mutableIntStateOf(-1) }
-                    // Which slot is selected when the home screen comes back, so it returns to where you were.
+                    // What's selected when the home screen comes back, so it returns to where you were: a slot,
+                    // or the settings or music button, along with the page that was showing.
                     var homeSlot by rememberSaveable { mutableIntStateOf(0) }
+                    var homePage by rememberSaveable { mutableIntStateOf(0) }
                     // Home always lands on the dashboard, from music, weather or the app picker.
                     LaunchedEffect(homePresses) {
                         showMusic = false
                         showWeather = false
                         showSettings = false
                         showNews = false
+                        showMuseum = false
                         pickingSlot = -1
+                    }
+                    LaunchedEffect(artworkToOpen) {
+                        val artwork = artworkToOpen ?: return@LaunchedEffect
+                        showMusic = false
+                        showWeather = false
+                        showSettings = false
+                        showNews = false
+                        pickingSlot = -1
+                        museumStart = artwork
+                        museumVisit++
+                        showMuseum = true
+                        artworkToOpen = null
                     }
                     when {
                         showMusic -> MusicScreen(player = music, sounds = sounds, onBack = {
@@ -157,6 +201,13 @@ class MainActivity : ComponentActivity() {
                             sounds.playBack()
                             showNews = false
                         })
+                        showMuseum -> key(museumVisit) {
+                            MuseumScreen(store = museum, sounds = sounds, startArtwork = museumStart, onBack = {
+                                sounds.playBack()
+                                showMuseum = false
+                                museumStart = null
+                            })
+                        }
                         pickingSlot >= 0 -> AppPickerScreen(
                             slot = pickingSlot,
                             store = channels,
@@ -166,10 +217,12 @@ class MainActivity : ComponentActivity() {
                         else -> HomeScreen(
                             store = channels,
                             sounds = sounds,
-                            onOpenMusic = {
+                            onOpenMusic = { page ->
                                 // Re-read the folder so newly copied songs show up.
                                 music.loadTracks()
                                 showMusic = true
+                                homeSlot = MUSIC_BUTTON
+                                homePage = page
                             },
                             musicMuted = music.isMuted,
                             onToggleMute = music::toggleMute,
@@ -184,27 +237,50 @@ class MainActivity : ComponentActivity() {
                                 showNews = true
                                 homeSlot = it
                             },
+                            museum = museum,
+                            onOpenMuseum = {
+                                showMuseum = true
+                                homeSlot = it
+                            },
                             onAddApp = {
                                 pickingSlot = it
                                 homeSlot = it
                             },
-                            onOpenSettings = { showSettings = true },
+                            onOpenSettings = { page ->
+                                showSettings = true
+                                homeSlot = SETTINGS_BUTTON
+                                homePage = page
+                            },
                             startSlot = homeSlot,
+                            startPage = homePage,
                         )
                     }
                     // Drawn over whatever screen is open, so waking it lands back where you were.
-                    if (screensaverShowing) Screensaver()
+                    if (screensaverShowing) Screensaver(screensaverPictures)
                 }
             }
         }
     }
 
     // Every remote press restarts the screensaver timer. While the screensaver is showing, a press only wakes it,
-    // so it doesn't also act on the screen underneath.
+    // so it doesn't also act on the screen underneath. Holding OK on a painting opens it in the Museum Channel.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         lastInputAt = SystemClock.uptimeMillis()
+        if (ignoreUntilRelease) {
+            if (event.action == KeyEvent.ACTION_UP) ignoreUntilRelease = false
+            return true
+        }
         if (screensaverShowing) {
-            if (event.action == KeyEvent.ACTION_UP) wake()
+            val artwork = screensaverPictures.showing?.artwork
+            // A held button repeats; the first repeat comes about half a second in.
+            val heldOk = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.keyCode in OK_KEYS
+            if (artwork != null && heldOk) {
+                artworkToOpen = artwork
+                ignoreUntilRelease = true
+                wake()
+            } else if (event.action == KeyEvent.ACTION_UP) {
+                wake()
+            }
             return true
         }
         return super.dispatchKeyEvent(event)
