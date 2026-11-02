@@ -36,7 +36,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
@@ -220,8 +219,9 @@ fun ChannelPreview(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(TileShape)
-                .background(WiiSurface),
+                // No white card behind the banner: where the rounded edge is smoothed, it would show through as a thin
+                // white line round dark banners.
+                .clip(TileShape),
         ) {
             Box(
                 modifier = Modifier
@@ -299,30 +299,27 @@ private fun PreviewButton(label: String, selected: Boolean) {
     }
 }
 
-/** The channel's banner, shown whole, over a blurred, stretched copy of itself that fills the rest of the space. */
+/**
+ * The channel's banner, filling the space edge to edge. The space is wider than the 16:9 banners (about 2.5 to 1),
+ * so a strip is trimmed off the top and bottom.
+ */
 @Composable
 private fun PreviewBanner(channel: Channel) {
     val context = LocalContext.current
-    val builtInBanner = builtInBanners[channel.packageName]
+    val builtInBanner = remember(channel.packageName) { bannerImage(context, channel.packageName) }
     val appBanner = remember(channel.packageName) {
         if (builtInBanner != null) null else loadBanner(context, channel.packageName)
     }
-    val banner: ImageBitmap? = if (builtInBanner != null) rememberBuiltInBanner(builtInBanner) else appBanner
+    val banner: ImageBitmap? = if (builtInBanner != null) rememberBuiltInBanner(builtInBanner, smooth = false) else appBanner
 
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(WiiSurface)) {
+    // Only a channel with no picture gets the white card, behind its name.
+    val fill = if (banner == null) WiiSurface else Color.Transparent
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().background(fill)) {
         if (banner != null) {
             Image(
                 bitmap = banner,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(40.dp),
-            )
-            Image(
-                bitmap = banner,
                 contentDescription = channel.name,
-                contentScale = ContentScale.Fit,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drop-in app banners (banner_<package>.jpg) are found by name while the app runs, so nothing in the code points at
+     them. This stops the release build from leaving them out. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/banner_*" />

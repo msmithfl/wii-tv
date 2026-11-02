@@ -40,7 +40,7 @@ fun ForecastTile(
     val weather = store.weather
     TileSurface(onClick = onClick, onLongClick = onLongClick, onFocused = onFocused, modifier = modifier) {
         Image(
-            bitmap = rememberBuiltInBanner(R.drawable.forecast_app),
+            bitmap = rememberBuiltInBanner(R.drawable.forecast_app, smooth = false),
             contentDescription = "Forecast Channel",
             contentScale = ContentScale.Crop,
             modifier = Modifier

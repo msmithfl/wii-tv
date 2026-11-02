@@ -78,7 +78,7 @@ fun NewsTile(
     val headlines = store.todaysHeadlines.map { it.title }.distinct()
     TileSurface(onClick = onClick, onLongClick = onLongClick, onFocused = onFocused, modifier = modifier) {
         Image(
-            bitmap = rememberBuiltInBanner(R.drawable.news_app),
+            bitmap = rememberBuiltInBanner(R.drawable.news_app, smooth = false),
             contentDescription = "News Channel",
             contentScale = ContentScale.Crop,
             modifier = Modifier

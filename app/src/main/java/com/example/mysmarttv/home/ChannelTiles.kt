@@ -73,18 +73,33 @@ internal val builtInBanners = mapOf(
 )
 
 /**
+ * The banner image for a channel's start screen, from res/drawable: MySmartTV's own channels' banners, or one dropped in for an
+ * installed app, named banner_ plus its package name with the dots as underscores (banner_com_netflix_ninja.jpg).
+ * Null if there's neither, so the app's own banner is used.
+ */
+@DrawableRes
+internal fun bannerImage(context: Context, packageName: String): Int? {
+    builtInBanners[packageName]?.let { return it }
+    val name = "banner_" + packageName.lowercase().replace(Regex("[^a-z0-9]"), "_")
+    // Looked up by name, since these are added without touching the code. res/raw/keep.xml keeps them in release builds.
+    @Suppress("DiscouragedApi")
+    return context.resources.getIdentifier(name, "drawable", context.packageName).takeIf { it != 0 }
+}
+
+/**
  * One of MySmartTV's own banner images, kept at its real pixel size and drawn with smooth scaling, so text
- * in it stays clean when it's shrunk down to card size.
+ * in it stays clean when it's shrunk down to card size. [smooth] false leaves out that smoothing, which softens the
+ * picture when it's shown large, like on the start screen, and on the Forecast and News cards.
  */
 @Composable
-internal fun rememberBuiltInBanner(@DrawableRes id: Int): ImageBitmap {
+internal fun rememberBuiltInBanner(@DrawableRes id: Int, smooth: Boolean = true): ImageBitmap {
     val resources = LocalContext.current.resources
-    return remember(id) {
+    return remember(id, smooth) {
         // Without inScaled = false, Android would first blow the image up to 1.5x for the TV's screen density.
         val options = BitmapFactory.Options().apply { inScaled = false }
         BitmapFactory.decodeResource(resources, id, options)
             // Mipmaps are pre-shrunk copies the TV blends between, instead of skipping pixels when shrinking.
-            .apply { setHasMipMap(true) }
+            .apply { setHasMipMap(smooth) }
             .asImageBitmap()
     }
 }
@@ -100,6 +115,7 @@ fun ChannelTile(
     onLongClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    // Drop-in banners are only for the start screen; the card keeps the app's own banner.
     val builtInBanner = builtInBanners[channel.packageName]
     val banner = remember(channel.packageName) {
         if (builtInBanner != null) null else loadBanner(context, channel.packageName)
