@@ -1,5 +1,6 @@
 package com.example.mysmarttv.music
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Environment
@@ -9,6 +10,8 @@ import androidx.compose.runtime.setValue
 import java.io.File
 
 private const val RESTART_THRESHOLD_MS = 3_000
+private const val PREFS_NAME = "music"
+private const val LOOP_MODE_KEY = "loop_mode"
 private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "ogg", "wav", "flac")
 private val LEADING_NUMBER = Regex("""^\d+\s*[.)\-_]?\s*""")
 
@@ -19,8 +22,13 @@ enum class LoopMode(val label: String) { Off("Off"), All("All"), One("One") }
 
 data class Track(val title: String, val path: String)
 
-/** Plays the songs in [MUSIC_FOLDER]. Its state is Compose state, so screens update on their own. */
-class MusicPlayer {
+/**
+ * Plays the songs in [MUSIC_FOLDER]. Its state is Compose state, so screens update on their own.
+ * The loop setting is saved on the TV, so it stays as you left it.
+ */
+class MusicPlayer(context: Context) {
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
     var tracks by mutableStateOf(emptyList<Track>())
         private set
 
@@ -28,7 +36,10 @@ class MusicPlayer {
         private set
     var isPlaying by mutableStateOf(false)
         private set
-    var loopMode by mutableStateOf(LoopMode.All)
+    // Starts out looping one song, so the first track (which plays at startup) repeats until it's changed.
+    var loopMode by mutableStateOf(
+        LoopMode.entries.firstOrNull { it.name == prefs.getString(LOOP_MODE_KEY, null) } ?: LoopMode.One
+    )
         private set
     var shuffle by mutableStateOf(false)
         private set
@@ -98,6 +109,7 @@ class MusicPlayer {
     fun cycleLoopMode() {
         loopMode = LoopMode.entries[(loopMode.ordinal + 1) % LoopMode.entries.size]
         player?.isLooping = loopMode == LoopMode.One
+        prefs.edit().putString(LOOP_MODE_KEY, loopMode.name).apply()
     }
 
     fun toggleShuffle() {

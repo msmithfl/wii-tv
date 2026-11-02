@@ -25,10 +25,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.mysmarttv.museum.MuseumStore
-import com.example.mysmarttv.museum.MuseumTile
+import com.example.mysmarttv.gallery.GalleryStore
+import com.example.mysmarttv.gallery.GalleryTile
+import com.example.mysmarttv.museum.MuseumLook
+import com.example.mysmarttv.science.ScienceLook
 import com.example.mysmarttv.news.NewsStore
 import com.example.mysmarttv.news.NewsTile
 import com.example.mysmarttv.ui.theme.wiiBackdrop
@@ -68,10 +74,19 @@ fun HomeScreen(
     news: NewsStore,
     newsHeadlines: Boolean,
     onOpenNews: (slot: Int) -> Unit,
-    museum: MuseumStore,
-    onOpenMuseum: (slot: Int) -> Unit,
+    museum: GalleryStore,
+    science: GalleryStore,
+    // Opens the Museum or Science Channel, named by its ID.
+    onOpenGallery: (channelId: String, slot: Int) -> Unit,
     onAddApp: (slot: Int) -> Unit,
     onOpenSettings: (page: Int) -> Unit,
+    // Whether picking a card shows its start screen first, through [onShowStartScreen], instead of opening it.
+    channelStartScreen: Boolean,
+    onShowStartScreen: (channel: Channel, slot: Int) -> Unit,
+    // True while a start screen is drawn over the dashboard. When it closes, the selection goes back onto [startSlot].
+    startScreenShowing: Boolean,
+    // Where each card sits on screen, by slot, kept up to date for the start screen to grow out of and shrink back into.
+    cardBounds: MutableMap<Int, Rect>,
     startSlot: Int = 0,
     startPage: Int = 0,
 ) {
@@ -97,6 +112,16 @@ fun HomeScreen(
     }
     // Follows the selection: moving onto a tile from the other page slides the strip over.
     var page by remember { mutableIntStateOf(if (startSlot >= 0) startSlot / PAGE_SIZE else startPage) }
+    // Picking a channel card shows its start screen first when that's turned on, or opens it right away.
+    fun pick(channel: Channel, slot: Int, open: () -> Unit) {
+        if (channelStartScreen) {
+            sounds.playChannelOpen()
+            onShowStartScreen(channel, slot)
+        } else {
+            sounds.playAppSelect()
+            open()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -133,6 +158,8 @@ fun HomeScreen(
                             val channel = store.slots[slot]
                             val tileModifier = Modifier
                                 .size(tileWidth, tileHeight)
+                                // Not clipped to the screen, so cards on the other page keep their real place.
+                                .onGloballyPositioned { cardBounds[slot] = Rect(it.positionInRoot(), it.size.toSize()) }
                                 .focusRequester(tileFocus[slot])
                                 .focusProperties {
                                     // At the strip's outer edges: the bottom row steps down to the corner
@@ -161,10 +188,7 @@ fun HomeScreen(
                             } else if (channel.packageName == WEATHER_ID) {
                                 ForecastTile(
                                     store = weather,
-                                    onClick = {
-                                        sounds.playAppSelect()
-                                        onOpenWeather(slot)
-                                    },
+                                    onClick = { pick(channel, slot) { onOpenWeather(slot) } },
                                     onLongClick = { removingSlot = slot },
                                     onFocused = onFocused,
                                     modifier = tileModifier,
@@ -173,21 +197,17 @@ fun HomeScreen(
                                 NewsTile(
                                     store = news,
                                     showHeadlines = newsHeadlines,
-                                    onClick = {
-                                        sounds.playAppSelect()
-                                        onOpenNews(slot)
-                                    },
+                                    onClick = { pick(channel, slot) { onOpenNews(slot) } },
                                     onLongClick = { removingSlot = slot },
                                     onFocused = onFocused,
                                     modifier = tileModifier,
                                 )
-                            } else if (channel.packageName == MUSEUM_ID) {
-                                MuseumTile(
-                                    store = museum,
-                                    onClick = {
-                                        sounds.playAppSelect()
-                                        onOpenMuseum(slot)
-                                    },
+                            } else if (channel.packageName == MUSEUM_ID || channel.packageName == SCIENCE_ID) {
+                                val isMuseum = channel.packageName == MUSEUM_ID
+                                GalleryTile(
+                                    store = if (isMuseum) museum else science,
+                                    look = if (isMuseum) MuseumLook else ScienceLook,
+                                    onClick = { pick(channel, slot) { onOpenGallery(channel.packageName, slot) } },
                                     onLongClick = { removingSlot = slot },
                                     onFocused = onFocused,
                                     modifier = tileModifier,
@@ -195,10 +215,7 @@ fun HomeScreen(
                             } else {
                                 ChannelTile(
                                     channel = channel,
-                                    onClick = {
-                                        sounds.playAppSelect()
-                                        launchApp(context, channel.packageName)
-                                    },
+                                    onClick = { pick(channel, slot) { launchApp(context, channel.packageName) } },
                                     // Hold OK on the remote to ask about taking an app off the dashboard.
                                     onLongClick = { removingSlot = slot },
                                     onFocused = onFocused,
@@ -264,6 +281,12 @@ fun HomeScreen(
             SETTINGS_BUTTON -> settingsFocus.requestFocus()
             MUSIC_BUTTON -> musicFocus.requestFocus()
             else -> tileFocus[startSlot].requestFocus()
+        }
+    }
+    LaunchedEffect(startScreenShowing) {
+        if (!startScreenShowing && startSlot >= 0) {
+            quietRefocus = true
+            refocusSlot = startSlot
         }
     }
     LaunchedEffect(refocusSlot) {

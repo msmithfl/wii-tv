@@ -12,3 +12,8 @@
 #}
 # jsoup can use the optional re2j regex library, which this app does not include.
 -dontwarn com.google.re2j.**
+
+# Kotlin splits some of its helper classes (like CollectionsKt) into parts that build on each other and can only
+# see each other from inside their own package. Moving one of them to another package crashes the app at startup
+# with an IllegalAccessError, so they keep their names and stay where they are. Unused ones can still be removed.
+-keep,allowshrinking class kotlin.**Kt__**

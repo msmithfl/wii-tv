@@ -1,5 +1,7 @@
 package com.example.mysmarttv.museum
 
+import com.example.mysmarttv.gallery.Exhibit
+import com.example.mysmarttv.gallery.GallerySection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -18,7 +20,7 @@ import kotlin.random.Random
  * The Museum Channel's galleries, in the order they're listed. Each is one of the Met's departments, showing only
  * the pieces the museum marks as highlights: its best-known works.
  */
-enum class MuseumSection(val title: String, val departmentId: Int?) {
+enum class MuseumSection(override val title: String, val departmentId: Int?) : GallerySection {
     // Not a department of its own: a handful of highlights from across the museum, picked once a day.
     Today("Today's Gallery", null),
     EuropeanPaintings("European Paintings", 11),
@@ -28,25 +30,6 @@ enum class MuseumSection(val title: String, val departmentId: Int?) {
     ArmsAndArmor("Arms and Armor", 4),
     MusicalInstruments("Musical Instruments", 18),
 }
-
-data class Artwork(
-    val id: Int,
-    val title: String,
-    val artist: String,
-    // Where the artist was from and when they lived, like "Dutch, Zundert 1853–1890 Auvers-sur-Oise".
-    val artistBio: String,
-    val date: String,
-    val medium: String,
-    val dimensions: String,
-    val culture: String,
-    val department: String,
-    // The full-size picture, and a smaller one (about 600 wide) for lists.
-    val imageUrl: String,
-    val smallImageUrl: String,
-    // Which of the Met's galleries it hangs in, or empty if it isn't on display.
-    val gallery: String,
-    val creditLine: String,
-)
 
 // How many pieces a gallery shows, and how many the day's gallery picks.
 private const val GALLERY_SIZE = 24
@@ -59,21 +42,18 @@ object MuseumClient {
     // Looking up many pieces at once is fine, but not all at the same moment.
     private val lookups = Semaphore(6)
 
-    /**
-     * A gallery's pieces. [seed] picks which stretch of the department's highlights is shown, so the same
-     * seed gives the same pieces; it changes each day for a fresh gallery.
-     */
-    suspend fun gallery(section: MuseumSection, seed: Long): List<Artwork> {
+    /** A gallery's pieces. The same [seed] gives the same pieces; it changes each day for a fresh gallery. */
+    suspend fun gallery(section: MuseumSection, seed: Long): List<Exhibit> {
         val size = if (section == MuseumSection.Today) TODAY_SIZE else GALLERY_SIZE
         // Asks for extra, since now and then one turns out to have no picture the Met can share.
-        val ids = searchHighlights(section.departmentId, count = size * 2, seed = seed + section.ordinal)
-        return artworks(ids).take(size)
+        val ids = searchHighlights(section.departmentId, count = size * 2, seed = seed)
+        return exhibits(ids).take(size)
     }
 
     /** One piece, or nothing if it has no picture the Met can share. */
-    suspend fun artwork(id: Int): Artwork? = withContext(Dispatchers.IO) {
+    suspend fun exhibit(id: Int): Exhibit? = withContext(Dispatchers.IO) {
         try {
-            toArtwork(id, JSONObject(read("$BASE/v1/objects/$id")))
+            toExhibit(id, JSONObject(read("$BASE/v1/objects/$id")))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -81,8 +61,8 @@ object MuseumClient {
         }
     }
 
-    /** IDs of highlights from [departmentId] (or anywhere, if null), a run of [count] starting at a spot [seed] picks. */
-    suspend fun searchHighlights(departmentId: Int?, count: Int, seed: Long): List<Int> = withContext(Dispatchers.IO) {
+    // IDs of highlights from [departmentId] (or anywhere, if null), a run of [count] starting at a spot [seed] picks.
+    private suspend fun searchHighlights(departmentId: Int?, count: Int, seed: Long): List<Int> = withContext(Dispatchers.IO) {
         val department = departmentId?.let { "&departmentId=$it" }.orEmpty()
         val base = "$BASE/v1.1/search?hasImages=true&isHighlight=true$department&q=${URLEncoder.encode("*", "UTF-8")}"
         val total = JSONObject(read("$base&limit=1")).optInt("total")
@@ -92,27 +72,43 @@ object MuseumClient {
     }
 
     // Looks the pieces up side by side, keeping their order and dropping any without a picture.
-    private suspend fun artworks(ids: List<Int>): List<Artwork> = coroutineScope {
-        ids.map { id -> async { lookups.withPermit { artwork(id) } } }.awaitAll().filterNotNull()
+    private suspend fun exhibits(ids: List<Int>): List<Exhibit> = coroutineScope {
+        ids.map { id -> async { lookups.withPermit { exhibit(id) } } }.awaitAll().filterNotNull()
     }
 
     // Pieces the Met can't share freely come without a picture link, and are left out.
-    private fun toArtwork(id: Int, json: JSONObject): Artwork? {
+    // The Met doesn't write descriptions, so the label is all facts.
+    private fun toExhibit(id: Int, json: JSONObject): Exhibit? {
         val imageUrl = json.optString("primaryImage").ifEmpty { return null }
-        return Artwork(
-            id = id,
+        val artist = json.optString("artistDisplayName")
+        val bio = json.optString("artistDisplayBio")
+        val culture = json.optString("culture")
+        val date = json.optString("objectDate")
+        val medium = json.optString("medium")
+        val gallery = json.optString("GalleryNumber")
+        // The culture stands in as the maker when the artist isn't known, so it's only listed when there is one.
+        val maker = artist.ifEmpty { culture }
+        return Exhibit(
+            id = id.toString(),
             title = json.optString("title").ifEmpty { return null },
-            artist = json.optString("artistDisplayName"),
-            artistBio = json.optString("artistDisplayBio"),
-            date = json.optString("objectDate"),
-            medium = json.optString("medium"),
-            dimensions = json.optString("dimensions"),
-            culture = json.optString("culture"),
-            department = json.optString("department"),
+            maker = maker,
+            makerDetail = bio,
             imageUrl = imageUrl,
             smallImageUrl = json.optString("primaryImageSmall").ifEmpty { imageUrl },
-            gallery = json.optString("GalleryNumber"),
-            creditLine = json.optString("creditLine"),
+            facts = listOf(
+                "Date" to date,
+                "Medium" to medium,
+                "Size" to json.optString("dimensions"),
+                "Culture" to if (artist.isNotEmpty()) culture else "",
+                "Department" to json.optString("department"),
+                "On view" to if (gallery.isNotEmpty()) "Gallery $gallery, The Met" else "Not on display right now",
+            ),
+            description = "",
+            summary = listOf(
+                if (artist.isNotEmpty() && bio.isNotEmpty()) "$artist ($bio)" else maker,
+                listOf(date, medium).filter { it.isNotEmpty() }.joinToString(" · "),
+            ).filter { it.isNotEmpty() }.joinToString("\n"),
+            footnote = json.optString("creditLine"),
         )
     }
 
@@ -127,6 +123,3 @@ object MuseumClient {
         }
     }
 }
-
-/** Who made it, for a caption: the artist, or the culture it came from when the artist isn't known. */
-val Artwork.maker: String get() = artist.ifEmpty { culture }

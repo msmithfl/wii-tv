@@ -1,7 +1,6 @@
 package com.example.mysmarttv.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,11 +24,9 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -46,19 +43,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.tv.material3.ClickableSurfaceDefaults
-import androidx.tv.material3.ExperimentalTvMaterial3Api
-import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.example.mysmarttv.R
 import com.example.mysmarttv.ui.theme.WiiBarBottom
-import com.example.mysmarttv.ui.theme.WiiBlue
 import com.example.mysmarttv.ui.theme.WiiBarEdge
 import com.example.mysmarttv.ui.theme.WiiBarTop
 import com.example.mysmarttv.ui.theme.WiiButtonFace
-import com.example.mysmarttv.ui.theme.WiiButtonRim
 import com.example.mysmarttv.ui.theme.WiiClockText
 import com.example.mysmarttv.ui.theme.WiiEmptyBottom
+import com.example.mysmarttv.ui.theme.WiiFont
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -138,9 +131,9 @@ fun ClockBar(
                 .padding(top = MiddleTop + 4.dp),
         )
 
-        // Opens MySmartTV's own settings.
+        // Opens MySmartTV's own settings. It carries the app's name, the way the Wii's left button said "Wii".
         CornerButton(
-            icon = R.drawable.settings_gear,
+            label = "TiiV",
             onClick = onSettingsClick,
             onFocused = onButtonFocused,
             modifier = Modifier
@@ -213,56 +206,52 @@ private fun TimeWithAmPm(time: String, amPm: String, modifier: Modifier = Modifi
     }
 }
 
-/** Round button in a corner of the bar. Without [onClick] it's just for looks and can't be selected. */
-@OptIn(ExperimentalTvMaterial3Api::class)
+/**
+ * Round button in a corner of the bar, showing an [icon] or a word ([label]). When selected it highlights like the
+ * dashboard's cards: the grey rim fades to glowing blue.
+ */
 @Composable
 private fun CornerButton(
-    @DrawableRes icon: Int,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
+    @DrawableRes icon: Int? = null,
+    label: String? = null,
     onLongClick: (() -> Unit)? = null,
     crossedOut: Boolean = false,
     onFocused: () -> Unit = {},
 ) {
-    if (onClick == null) {
-        ButtonFace(icon, crossedOut, WiiButtonRim, modifier.size(ButtonSize).shadow(4.dp, CircleShape))
-        return
-    }
-    // The rim is always blue; when selected, the button just grows a little.
-    Surface(
+    TileSurface(
         onClick = onClick,
         onLongClick = onLongClick,
-        modifier = modifier
-            .size(ButtonSize)
-            .onFocusChanged { if (it.hasFocus) onFocused() },
-        shape = ClickableSurfaceDefaults.shape(CircleShape),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Color.Transparent,
-            focusedContainerColor = Color.Transparent,
-        ),
-        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.1f),
+        onFocused = onFocused,
+        shape = CircleShape,
+        modifier = modifier.size(ButtonSize),
     ) {
-        ButtonFace(icon, crossedOut, WiiBlue, Modifier.fillMaxSize())
+        ButtonFace(icon, label, crossedOut, Modifier.fillMaxSize())
     }
 }
 
 @Composable
-private fun ButtonFace(@DrawableRes icon: Int, crossedOut: Boolean, rimColor: Color, modifier: Modifier = Modifier) {
+private fun ButtonFace(@DrawableRes icon: Int?, label: String?, crossedOut: Boolean, modifier: Modifier = Modifier) {
     val slashColor = WiiClockText
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(WiiButtonFace, WiiEmptyBottom)))
-            .border(3.dp, rimColor, CircleShape),
+            .background(Brush.verticalGradient(listOf(WiiButtonFace, WiiEmptyBottom))),
     ) {
         // The icons are drawn white and tinted here, so they follow light and dark mode.
-        Image(
-            painter = painterResource(icon),
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(WiiClockText),
-            modifier = Modifier.size(IconSize),
-        )
+        if (icon != null) {
+            Image(
+                painter = painterResource(icon),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(WiiClockText),
+                modifier = Modifier.size(IconSize),
+            )
+        }
+        if (label != null) {
+            Text(text = label, fontSize = 26.sp, fontFamily = WiiFont, fontWeight = FontWeight.Bold, color = WiiClockText)
+        }
         if (crossedOut) {
             // A slash across the middle of the face, over the icon.
             Box(

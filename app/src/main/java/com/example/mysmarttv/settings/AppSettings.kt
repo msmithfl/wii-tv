@@ -14,6 +14,7 @@ private const val SLEEP_AFTER_KEY = "sleep_after_minutes"
 private const val SCREENSAVER_PICTURES_KEY = "screensaver_pictures"
 private const val NEWS_CARD_HEADLINES_KEY = "news_card_headlines"
 private const val NEWS_TEXT_SIZE_KEY = "news_text_size"
+private const val CHANNEL_START_SCREEN_KEY = "channel_start_screen"
 
 /** The News story text sizes, as a share of the largest. The largest is the default. */
 val NEWS_TEXT_SIZES = listOf(0.7f, 0.8f, 0.9f, 1f)
@@ -70,6 +71,15 @@ class AppSettings(context: Context) {
     fun nextScreensaverPictures() {
         screensaverPictures = PictureSource.entries[(screensaverPictures.ordinal + 1) % PictureSource.entries.size]
         prefs.edit().putString(SCREENSAVER_PICTURES_KEY, screensaverPictures.name).apply()
+    }
+
+    // Whether picking a dashboard card first shows its start screen, or opens it straight away.
+    var channelStartScreen by mutableStateOf(prefs.getBoolean(CHANNEL_START_SCREEN_KEY, true))
+        private set
+
+    fun toggleChannelStartScreen() {
+        channelStartScreen = !channelStartScreen
+        prefs.edit().putBoolean(CHANNEL_START_SCREEN_KEY, channelStartScreen).apply()
     }
 
     fun toggleDarkMode() {

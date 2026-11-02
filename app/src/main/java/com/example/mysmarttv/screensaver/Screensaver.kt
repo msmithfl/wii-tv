@@ -83,7 +83,7 @@ fun Screensaver(pictures: ScreensaverPictures) {
             if (next != null) shown = next else delay(RETRY_MS)
         }
     }
-    // Lets the app know which picture is up, so holding OK on a painting can open it in the Museum Channel.
+    // Lets the app know which picture is up, so holding OK can open it in the Science or Museum Channel.
     DisposableEffect(shown) {
         pictures.showing = shown
         onDispose { pictures.showing = null }
@@ -105,7 +105,7 @@ fun Screensaver(pictures: ScreensaverPictures) {
                     }
                     Image(
                         bitmap = picture.image,
-                        contentDescription = picture.title,
+                        contentDescription = picture.exhibit.title,
                         contentScale = if (picture.fillScreen) ContentScale.Crop else ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
@@ -114,7 +114,11 @@ fun Screensaver(pictures: ScreensaverPictures) {
                                 scaleY = zoom.value
                             },
                     )
-                    Caption(picture, Modifier.align(Alignment.BottomStart))
+                    if (picture.source == PictureSource.Chromecast) {
+                        PhotoCredit(picture.exhibit.maker, Modifier.align(Alignment.BottomStart))
+                    } else {
+                        Caption(picture, Modifier.align(Alignment.BottomStart))
+                    }
                 }
             }
         }
@@ -130,6 +134,19 @@ fun Screensaver(pictures: ScreensaverPictures) {
     }
 }
 
+// Just the photographer's name in the corner, the way the Chromecast showed its photos. Nothing if it isn't known.
+@Composable
+private fun PhotoCredit(photographer: String, modifier: Modifier = Modifier) {
+    if (photographer.isEmpty()) return
+    Text(
+        text = "Photo by $photographer",
+        style = Shadowed,
+        fontSize = 16.sp,
+        color = Color.White.copy(alpha = 0.85f),
+        modifier = modifier.padding(start = 48.dp, bottom = 36.dp),
+    )
+}
+
 // The title and description on a dark fade at the bottom of the picture.
 @Composable
 private fun Caption(picture: ScreensaverPicture, modifier: Modifier = Modifier) {
@@ -139,10 +156,11 @@ private fun Caption(picture: ScreensaverPicture, modifier: Modifier = Modifier) 
             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
             .padding(start = 48.dp, end = 48.dp, top = 72.dp, bottom = 36.dp),
     ) {
-        Text(text = picture.title, style = Shadowed, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (picture.description.isNotEmpty()) {
+        val exhibit = picture.exhibit
+        Text(text = exhibit.title, style = Shadowed, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (exhibit.summary.isNotEmpty()) {
             Text(
-                text = picture.description,
+                text = exhibit.summary,
                 style = Shadowed,
                 fontSize = 16.sp,
                 color = Color.White.copy(alpha = 0.85f),
@@ -153,14 +171,12 @@ private fun Caption(picture: ScreensaverPicture, modifier: Modifier = Modifier) 
                     .widthIn(max = 900.dp),
             )
         }
-        if (picture.artwork != null) {
-            Text(
-                text = "Hold OK to see more about this piece",
-                style = Shadowed,
-                fontSize = 14.sp,
-                color = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.padding(top = 10.dp),
-            )
-        }
+        Text(
+            text = "Hold OK to learn more",
+            style = Shadowed,
+            fontSize = 14.sp,
+            color = Color.White.copy(alpha = 0.6f),
+            modifier = Modifier.padding(top = 10.dp),
+        )
     }
 }

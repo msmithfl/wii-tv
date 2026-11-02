@@ -32,8 +32,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.PaintingStyle
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -63,9 +65,11 @@ import com.example.mysmarttv.ui.theme.WiiTileBorder
 internal val TileShape = TubeShape()
 
 // Banners for the channels built into MySmartTV, from res/drawable.
-private val builtInBanners = mapOf(
+internal val builtInBanners = mapOf(
     WEATHER_ID to R.drawable.forecast_app,
     NEWS_ID to R.drawable.news_app,
+    MUSEUM_ID to R.drawable.museum_app,
+    SCIENCE_ID to R.drawable.science_app,
 )
 
 /**
@@ -206,7 +210,10 @@ private fun DrawScope.drawCropped(drawable: Drawable) {
     drawable.draw(drawContext.canvas.nativeCanvas)
 }
 
-/** The selectable card every dashboard tile is drawn on. */
+/**
+ * The selectable card every dashboard tile is drawn on. The bar's round corner buttons use it too, with a circle
+ * for [shape], so they highlight the same way.
+ */
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 internal fun TileSurface(
@@ -214,6 +221,7 @@ internal fun TileSurface(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
+    shape: Shape = TileShape,
     content: @Composable BoxScope.() -> Unit,
 ) {
     // Selecting a card doesn't grow it, and its border stays the same thickness. The border just fades from
@@ -242,7 +250,7 @@ internal fun TileSurface(
                     val paint = Paint().apply { color = glowColor.copy(alpha = GlowStrength * glow) }
                     paint.asFrameworkPaint().maskFilter =
                         BlurMaskFilter(GlowSpread.toPx(), BlurMaskFilter.Blur.NORMAL)
-                    drawIntoCanvas { it.drawOutline(TileShape.createOutline(size, layoutDirection, this), paint) }
+                    drawIntoCanvas { it.drawOutline(shape.createOutline(size, layoutDirection, this), paint) }
                 }
             }
             .onFocusChanged {
@@ -250,12 +258,12 @@ internal fun TileSurface(
                 if (it.hasFocus) onFocused()
             }
             // Drawn over the card's picture, so it shows all the way round.
-            .border(2.dp, borderColor, TileShape)
+            .border(2.dp, borderColor, shape)
             // A blue fade just inside the border, over the picture, getting fainter toward the middle.
             .drawWithContent {
                 drawContent()
                 if (glow > 0f) {
-                    val edge = (TileShape.createOutline(size, layoutDirection, this) as Outline.Generic).path
+                    val edge = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent)) }
                     val paint = Paint().apply {
                         color = glowColor.copy(alpha = InnerGlowStrength * glow)
                         style = PaintingStyle.Stroke
@@ -267,7 +275,7 @@ internal fun TileSurface(
                     clipPath(edge) { drawIntoCanvas { it.drawPath(edge, paint) } }
                 }
             },
-        shape = ClickableSurfaceDefaults.shape(TileShape),
+        shape = ClickableSurfaceDefaults.shape(shape),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = WiiSurface,
             focusedContainerColor = WiiSurface,

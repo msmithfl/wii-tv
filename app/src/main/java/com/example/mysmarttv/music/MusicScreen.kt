@@ -55,6 +55,7 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import com.example.mysmarttv.R
 import com.example.mysmarttv.home.Sounds
+import com.example.mysmarttv.ui.theme.IconPillButton
 import com.example.mysmarttv.ui.theme.PillButton
 import com.example.mysmarttv.ui.theme.WiiBlue
 import com.example.mysmarttv.ui.theme.WiiSurface
@@ -280,13 +281,24 @@ private fun NowPlayingPanel(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         ) {
-            PillButton(label = "Prev", onClick = clicks.select(player::previous), modifier = leftEdge.then(clicks.moves))
-            PillButton(
-                label = if (player.isPlaying) "Pause" else "Play",
+            IconPillButton(
+                icon = R.drawable.music_previous,
+                description = "Previous",
+                onClick = clicks.select(player::previous),
+                modifier = leftEdge.then(clicks.moves),
+            )
+            IconPillButton(
+                icon = if (player.isPlaying) R.drawable.music_pause else R.drawable.music_play,
+                description = if (player.isPlaying) "Pause" else "Play",
                 onClick = clicks.select(player::togglePlayPause),
                 modifier = clicks.moves.focusRequester(playButton),
             )
-            PillButton(label = "Next", onClick = clicks.select(player::next), modifier = clicks.moves)
+            IconPillButton(
+                icon = R.drawable.music_next,
+                description = "Next",
+                onClick = clicks.select(player::next),
+                modifier = clicks.moves,
+            )
         }
         Spacer(Modifier.height(12.dp))
         Row(

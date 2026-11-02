@@ -19,23 +19,35 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.mysmarttv.gallery.Exhibit
+import com.example.mysmarttv.gallery.GalleryScreen
 import com.example.mysmarttv.home.AppPickerScreen
+import com.example.mysmarttv.home.ChannelPreview
 import com.example.mysmarttv.home.ChannelStore
 import com.example.mysmarttv.home.HomeScreen
+import com.example.mysmarttv.home.MUSEUM_ID
 import com.example.mysmarttv.home.MUSIC_BUTTON
+import com.example.mysmarttv.home.NEWS_ID
+import com.example.mysmarttv.home.SCIENCE_ID
 import com.example.mysmarttv.home.SETTINGS_BUTTON
 import com.example.mysmarttv.home.Sounds
+import com.example.mysmarttv.home.WEATHER_ID
+import com.example.mysmarttv.home.launchApp
 import com.example.mysmarttv.music.MusicPlayer
 import com.example.mysmarttv.music.MusicScreen
-import com.example.mysmarttv.museum.Artwork
-import com.example.mysmarttv.museum.MuseumScreen
-import com.example.mysmarttv.museum.MuseumStore
+import com.example.mysmarttv.museum.MuseumLook
+import com.example.mysmarttv.museum.museumStore
 import com.example.mysmarttv.news.NewsScreen
 import com.example.mysmarttv.news.NewsStore
+import com.example.mysmarttv.science.ScienceLook
+import com.example.mysmarttv.science.scienceStore
+import com.example.mysmarttv.screensaver.PictureSource
 import com.example.mysmarttv.screensaver.Screensaver
+import com.example.mysmarttv.screensaver.ScreensaverPicture
 import com.example.mysmarttv.screensaver.ScreensaverPictures
 import com.example.mysmarttv.settings.AppSettings
 import com.example.mysmarttv.settings.SettingsScreen
@@ -54,14 +66,15 @@ class MainActivity : ComponentActivity() {
     private lateinit var sounds: Sounds
     private lateinit var channels: ChannelStore
     private lateinit var appSettings: AppSettings
-    private val music = MusicPlayer()
+    private lateinit var music: MusicPlayer
     private val weather = WeatherStore()
     private lateinit var news: NewsStore
-    private val screensaverPictures = ScreensaverPictures { appSettings.screensaverPictures }
-    private val museum = MuseumStore()
+    private val screensaverPictures = ScreensaverPictures(this) { appSettings.screensaverPictures }
+    private val museum = museumStore()
+    private val science = scienceStore()
 
-    // Set when OK is held on a painting in the screensaver, to open it in the Museum Channel.
-    private var artworkToOpen by mutableStateOf<Artwork?>(null)
+    // Set when OK is held on a picture in the screensaver, to open it in the Science or Museum Channel.
+    private var pictureToOpen by mutableStateOf<ScreensaverPicture?>(null)
     // After that hold, the rest of the press (its repeats and release) is ignored, so it doesn't also act on the screen.
     private var ignoreUntilRelease = false
 
@@ -89,6 +102,7 @@ class MainActivity : ComponentActivity() {
         sounds = Sounds(this)
         channels = ChannelStore(this)
         appSettings = AppSettings(this)
+        music = MusicPlayer(this)
         news = NewsStore(this)
         // Only on a fresh launch, not when Android rebuilds the screen.
         if (savedInstanceState == null) sounds.playStartup(then = ::playFirstSong)
@@ -109,9 +123,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) { news.keepFresh() }
         }
-        // The same for the Museum Channel's artwork of the day.
+        // The same for the Museum and Science Channels' pictures of the day.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) { museum.keepFresh() }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { science.keepFresh() }
         }
         // Downloads the screensaver's first picture ahead, so it shows the moment the screensaver starts.
         lifecycleScope.launch { screensaverPictures.prepare() }
@@ -152,13 +169,18 @@ class MainActivity : ComponentActivity() {
                     var showWeather by rememberSaveable { mutableStateOf(false) }
                     var showSettings by rememberSaveable { mutableStateOf(false) }
                     var showNews by rememberSaveable { mutableStateOf(false) }
-                    var showMuseum by rememberSaveable { mutableStateOf(false) }
-                    // A piece to open the Museum Channel straight to, from the screensaver. Each one counts as a
-                    // fresh visit, so the channel starts over at that piece even if it was already open.
-                    var museumStart by remember { mutableStateOf<Artwork?>(null) }
-                    var museumVisit by remember { mutableIntStateOf(0) }
+                    // Which gallery channel is open (the Museum or Science Channel's ID), or empty for neither.
+                    var openGallery by rememberSaveable { mutableStateOf("") }
+                    // A piece to open it straight to, from the screensaver. Each one counts as a fresh visit, so the
+                    // channel starts over at that piece even if it was already open.
+                    var galleryStart by remember { mutableStateOf<Exhibit?>(null) }
+                    var galleryVisit by remember { mutableIntStateOf(0) }
                     // The dashboard slot an app is being picked for, or -1 when not picking.
                     var pickingSlot by rememberSaveable { mutableIntStateOf(-1) }
+                    // The dashboard slot whose start screen is showing, or -1 for none.
+                    var startScreenSlot by rememberSaveable { mutableIntStateOf(-1) }
+                    // Where each dashboard card is on screen, filled in by the dashboard as it lays them out.
+                    val cardBounds = remember { HashMap<Int, Rect>() }
                     // What's selected when the home screen comes back, so it returns to where you were: a slot,
                     // or the settings or music button, along with the page that was showing.
                     var homeSlot by rememberSaveable { mutableIntStateOf(0) }
@@ -169,21 +191,24 @@ class MainActivity : ComponentActivity() {
                         showWeather = false
                         showSettings = false
                         showNews = false
-                        showMuseum = false
+                        openGallery = ""
+                        startScreenSlot = -1
                         pickingSlot = -1
                     }
-                    LaunchedEffect(artworkToOpen) {
-                        val artwork = artworkToOpen ?: return@LaunchedEffect
+                    LaunchedEffect(pictureToOpen) {
+                        val picture = pictureToOpen ?: return@LaunchedEffect
                         showMusic = false
                         showWeather = false
                         showSettings = false
                         showNews = false
+                        startScreenSlot = -1
                         pickingSlot = -1
-                        museumStart = artwork
-                        museumVisit++
-                        showMuseum = true
-                        artworkToOpen = null
+                        galleryStart = picture.exhibit
+                        galleryVisit++
+                        openGallery = if (picture.source == PictureSource.Met) MUSEUM_ID else SCIENCE_ID
+                        pictureToOpen = null
                     }
+                    val startScreenChannel = channels.slots.getOrNull(startScreenSlot)
                     when {
                         showMusic -> MusicScreen(player = music, sounds = sounds, onBack = {
                             sounds.playBack()
@@ -201,12 +226,19 @@ class MainActivity : ComponentActivity() {
                             sounds.playBack()
                             showNews = false
                         })
-                        showMuseum -> key(museumVisit) {
-                            MuseumScreen(store = museum, sounds = sounds, startArtwork = museumStart, onBack = {
-                                sounds.playBack()
-                                showMuseum = false
-                                museumStart = null
-                            })
+                        openGallery.isNotEmpty() -> key(galleryVisit, openGallery) {
+                            val isMuseum = openGallery == MUSEUM_ID
+                            GalleryScreen(
+                                store = if (isMuseum) museum else science,
+                                look = if (isMuseum) MuseumLook else ScienceLook,
+                                sounds = sounds,
+                                startExhibit = galleryStart,
+                                onBack = {
+                                    sounds.playBack()
+                                    openGallery = ""
+                                    galleryStart = null
+                                },
+                            )
                         }
                         pickingSlot >= 0 -> AppPickerScreen(
                             slot = pickingSlot,
@@ -214,46 +246,85 @@ class MainActivity : ComponentActivity() {
                             sounds = sounds,
                             onDone = { pickingSlot = -1 },
                         )
-                        else -> HomeScreen(
-                            store = channels,
-                            sounds = sounds,
-                            onOpenMusic = { page ->
-                                // Re-read the folder so newly copied songs show up.
-                                music.loadTracks()
-                                showMusic = true
-                                homeSlot = MUSIC_BUTTON
-                                homePage = page
-                            },
-                            musicMuted = music.isMuted,
-                            onToggleMute = music::toggleMute,
-                            weather = weather,
-                            onOpenWeather = {
-                                showWeather = true
-                                homeSlot = it
-                            },
-                            news = news,
-                            newsHeadlines = appSettings.newsCardHeadlines,
-                            onOpenNews = {
-                                showNews = true
-                                homeSlot = it
-                            },
-                            museum = museum,
-                            onOpenMuseum = {
-                                showMuseum = true
-                                homeSlot = it
-                            },
-                            onAddApp = {
-                                pickingSlot = it
-                                homeSlot = it
-                            },
-                            onOpenSettings = { page ->
-                                showSettings = true
-                                homeSlot = SETTINGS_BUTTON
-                                homePage = page
-                            },
-                            startSlot = homeSlot,
-                            startPage = homePage,
-                        )
+                        else -> {
+                            HomeScreen(
+                                store = channels,
+                                sounds = sounds,
+                                onOpenMusic = { page ->
+                                    // Re-read the folder so newly copied songs show up.
+                                    music.loadTracks()
+                                    showMusic = true
+                                    homeSlot = MUSIC_BUTTON
+                                    homePage = page
+                                },
+                                musicMuted = music.isMuted,
+                                onToggleMute = music::toggleMute,
+                                weather = weather,
+                                onOpenWeather = {
+                                    showWeather = true
+                                    homeSlot = it
+                                },
+                                news = news,
+                                newsHeadlines = appSettings.newsCardHeadlines,
+                                onOpenNews = {
+                                    showNews = true
+                                    homeSlot = it
+                                },
+                                museum = museum,
+                                science = science,
+                                onOpenGallery = { channelId, slot ->
+                                    openGallery = channelId
+                                    homeSlot = slot
+                                },
+                                onAddApp = {
+                                    pickingSlot = it
+                                    homeSlot = it
+                                },
+                                channelStartScreen = appSettings.channelStartScreen,
+                                onShowStartScreen = { _, slot ->
+                                    startScreenSlot = slot
+                                    homeSlot = slot
+                                },
+                                startScreenShowing = startScreenChannel != null,
+                                cardBounds = cardBounds,
+                                onOpenSettings = { page ->
+                                    showSettings = true
+                                    homeSlot = SETTINGS_BUTTON
+                                    homePage = page
+                                },
+                                startSlot = homeSlot,
+                                startPage = homePage,
+                            )
+                            // Drawn over the dashboard, so it can grow out of the picked card and shrink back into it.
+                            if (startScreenChannel != null) ChannelPreview(
+                                channel = startScreenChannel,
+                                cardBounds = cardBounds[startScreenSlot],
+                                sounds = sounds,
+                                onStart = {
+                                    val id = startScreenChannel.packageName
+                                    startScreenSlot = -1
+                                    when (id) {
+                                        WEATHER_ID -> showWeather = true
+                                        NEWS_ID -> showNews = true
+                                        MUSEUM_ID, SCIENCE_ID -> openGallery = id
+                                        else -> launchApp(this@MainActivity, id)
+                                    }
+                                },
+                                onBack = {
+                                    startScreenSlot = -1
+                                },
+                                // Steps through the dashboard's filled slots, wrapping round at either end. The dashboard
+                                // follows along, so going back lands on the channel you ended up on.
+                                onPrevious = {
+                                    startScreenSlot = nextFilledSlot(startScreenSlot, -1)
+                                    homeSlot = startScreenSlot
+                                },
+                                onNext = {
+                                    startScreenSlot = nextFilledSlot(startScreenSlot, 1)
+                                    homeSlot = startScreenSlot
+                                },
+                            )
+                        }
                     }
                     // Drawn over whatever screen is open, so waking it lands back where you were.
                     if (screensaverShowing) Screensaver(screensaverPictures)
@@ -263,7 +334,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // Every remote press restarts the screensaver timer. While the screensaver is showing, a press only wakes it,
-    // so it doesn't also act on the screen underneath. Holding OK on a painting opens it in the Museum Channel.
+    // so it doesn't also act on the screen underneath. Holding OK on a picture opens it in the Science or Museum Channel.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         lastInputAt = SystemClock.uptimeMillis()
         if (ignoreUntilRelease) {
@@ -271,11 +342,12 @@ class MainActivity : ComponentActivity() {
             return true
         }
         if (screensaverShowing) {
-            val artwork = screensaverPictures.showing?.artwork
+            // Chromecast photos have no channel to open, so holding OK on one just wakes the screen.
+            val picture = screensaverPictures.showing?.takeIf { it.source != PictureSource.Chromecast }
             // A held button repeats; the first repeat comes about half a second in.
             val heldOk = event.action == KeyEvent.ACTION_DOWN && event.repeatCount > 0 && event.keyCode in OK_KEYS
-            if (artwork != null && heldOk) {
-                artworkToOpen = artwork
+            if (picture != null && heldOk) {
+                pictureToOpen = picture
                 ignoreUntilRelease = true
                 wake()
             } else if (event.action == KeyEvent.ACTION_UP) {
@@ -284,6 +356,17 @@ class MainActivity : ComponentActivity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    // The next slot after [from] holding a channel, going [step] at a time and wrapping round.
+    private fun nextFilledSlot(from: Int, step: Int): Int {
+        val slots = channels.slots
+        var slot = from
+        repeat(slots.size) {
+            slot = Math.floorMod(slot + step, slots.size)
+            if (slots[slot] != null) return slot
+        }
+        return from
     }
 
     private fun wake() {

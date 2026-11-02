@@ -80,6 +80,16 @@ fun SettingsScreen(settings: AppSettings, sounds: Sounds, onBack: () -> Unit) {
                 onFocused = onRowFocused,
                 modifier = Modifier.focusRequester(firstRow),
             )
+            // Off jumps straight into an app when its card is picked, skipping the start screen.
+            SettingRow(
+                label = "Channel start screen",
+                value = if (settings.channelStartScreen) "On" else "Off",
+                onClick = {
+                    sounds.playAppSelect()
+                    settings.toggleChannelStartScreen()
+                },
+                onFocused = onRowFocused,
+            )
             SettingRow(
                 label = "Screensaver",
                 value = screensaverLabel(settings.screensaverMinutes),

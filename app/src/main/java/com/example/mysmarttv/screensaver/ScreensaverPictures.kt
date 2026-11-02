@@ -1,31 +1,38 @@
 package com.example.mysmarttv.screensaver
 
+import android.content.Context
 import android.graphics.BitmapFactory
-import android.text.Html
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
-import com.example.mysmarttv.museum.Artwork
-import com.example.mysmarttv.museum.MuseumClient
-import com.example.mysmarttv.museum.maker
 import androidx.compose.ui.graphics.asImageBitmap
+import com.example.mysmarttv.R
+import com.example.mysmarttv.gallery.Exhibit
+import com.example.mysmarttv.museum.MuseumClient
+import com.example.mysmarttv.science.NasaClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
-/** Where the screensaver's pictures come from. Chosen in Settings. */
+/** Where the screensaver's pictures come from. Chosen in Settings, which steps through them in this order. */
 enum class PictureSource(val label: String) {
     Nasa("NASA"),
     Met("Met Museum"),
-    Both("NASA + Met Museum"),
+    // The photos the original Chromecast showed on its home screen.
+    Chromecast("Chromecast Photos"),
+    // Takes turns between the sources above. Named Both from when there were only two, so a saved choice still matches.
+    Both("Mix of All"),
 }
+
+// The sources a mix takes turns between.
+private val MIX = listOf(PictureSource.Nasa, PictureSource.Met, PictureSource.Chromecast)
 
 // What the space pictures are searched for in NASA's image library. A couple are picked at random each time it runs low.
 private val NASA_TOPICS = listOf(
@@ -34,53 +41,42 @@ private val NASA_TOPICS = listOf(
 )
 
 // Where the Met's paintings are searched for, as its department number and a search word. One is picked at random
-// each time it runs low: European Paintings, the American Wing, and Asian Art.
+// each time it runs low: European Paintings, American Decorative Arts, and Asian Art.
 private val MET_SEARCHES = listOf(11 to "painting", 11 to "landscape", 1 to "painting", 6 to "landscape")
-
-// Wide space pictures only, so they fill the TV without cutting off much.
-private const val MIN_ASPECT = 1.3f
 
 // Pictures are shrunk to about the TV's width, so a huge original doesn't take up too much memory.
 private const val SCREEN_WIDTH = 1920
 
-// Larger NASA files than this are skipped; some originals are hundreds of megabytes.
-private const val MAX_FILE_BYTES = 15_000_000
-
-// Descriptions are cut after the sentence that passes this length, so a long one doesn't cover the picture.
-private const val DESCRIPTION_LENGTH = 300
-
 /**
- * A picture ready to show. [fillScreen] crops it to fill the TV; otherwise it's shown whole, like a painting on a wall.
- * A painting from the Met carries its [artwork], so holding OK can open it in the Museum Channel.
+ * A picture ready to show, with the piece it's of, so holding OK can open it in the Science or Museum Channel.
+ * [fillScreen] crops it to fill the TV; otherwise it's shown whole, like a painting on a wall.
+ * A Chromecast photo has no channel; its piece is just the photographer's name, as the maker.
  */
 data class ScreensaverPicture(
-    val title: String,
-    val description: String,
+    val exhibit: Exhibit,
     val image: ImageBitmap,
     val fillScreen: Boolean,
     val source: PictureSource,
-    val artwork: Artwork? = null,
 )
-
-private data class Listing(val title: String, val description: String, val imageUrl: String)
 
 /**
  * Pictures for the screensaver: space pictures from NASA's image library, paintings from the Metropolitan
- * Museum of Art, or both taking turns. Both are free and need no key. One picture is kept downloaded ahead,
- * so the screensaver can show it the moment it starts. [source] is read each time, so a change in Settings
- * takes effect with the next picture.
+ * Museum of Art, the original Chromecast's photos, or all three taking turns. One picture is kept downloaded
+ * ahead, so the screensaver can show it the moment it starts. [source] is read each time, so a change in
+ * Settings takes effect with the next picture.
  */
-class ScreensaverPictures(private val source: () -> PictureSource) {
-    private val nasaWaiting = ArrayDeque<Listing>()
+class ScreensaverPictures(private val context: Context, private val source: () -> PictureSource) {
+    private val nasaWaiting = ArrayDeque<Exhibit>()
     // The Met's search only gives object numbers; each one's details are looked up when its turn comes.
     private val metWaiting = ArrayDeque<Int>()
+    private val chromecastWaiting = ArrayDeque<Exhibit>()
     private var ready: ScreensaverPicture? = null
+    // In a mix, whose turn is next.
+    private var mixTurn = 0
+    private val lock = Mutex()
 
     /** The picture on screen right now, while the screensaver is showing. */
     var showing by mutableStateOf<ScreensaverPicture?>(null)
-    // With both chosen, which one is next.
-    private var nasaNext = true
-    private val lock = Mutex()
 
     /** Downloads the next picture, if one isn't already waiting. */
     suspend fun prepare() = lock.withLock {
@@ -95,22 +91,22 @@ class ScreensaverPictures(private val source: () -> PictureSource) {
     private fun allowed(pictureSource: PictureSource) = source().let { it == PictureSource.Both || it == pictureSource }
 
     private suspend fun load(): ScreensaverPicture? {
-        val useNasa = when (source()) {
-            PictureSource.Nasa -> true
-            PictureSource.Met -> false
-            PictureSource.Both -> nasaNext.also { nasaNext = !nasaNext }
+        val from = source().takeUnless { it == PictureSource.Both } ?: MIX[mixTurn++ % MIX.size]
+        return when (from) {
+            PictureSource.Met -> loadMet()
+            PictureSource.Chromecast -> loadChromecast()
+            else -> loadNasa()
         }
-        return if (useNasa) loadNasa() else loadMet()
     }
 
     // Tries a few in a row, in case a picture fails to download.
     private suspend fun loadNasa(): ScreensaverPicture? {
         repeat(5) {
-            if (nasaWaiting.isEmpty()) nasaWaiting.addAll(searchNasa())
-            val listing = nasaWaiting.removeFirstOrNull() ?: return null
-            download(listing.imageUrl)?.let {
-                return ScreensaverPicture(listing.title, listing.description, it, fillScreen = true, PictureSource.Nasa)
+            if (nasaWaiting.isEmpty()) {
+                nasaWaiting.addAll(NASA_TOPICS.shuffled().take(2).flatMap { NasaClient.search(it, (1..3).random(), wideOnly = true) }.shuffled())
             }
+            val exhibit = nasaWaiting.removeFirstOrNull() ?: return null
+            download(exhibit.imageUrl)?.let { return ScreensaverPicture(exhibit, it, fillScreen = true, PictureSource.Nasa) }
         }
         return null
     }
@@ -120,65 +116,60 @@ class ScreensaverPictures(private val source: () -> PictureSource) {
         repeat(8) {
             if (metWaiting.isEmpty()) metWaiting.addAll(searchMet())
             val id = metWaiting.removeFirstOrNull() ?: return null
-            val artwork = MuseumClient.artwork(id) ?: return@repeat
-            download(artwork.imageUrl)?.let {
-                return ScreensaverPicture(artwork.title, metCaption(artwork), it, fillScreen = false, PictureSource.Met, artwork)
-            }
+            val exhibit = MuseumClient.exhibit(id) ?: return@repeat
+            download(exhibit.imageUrl)?.let { return ScreensaverPicture(exhibit, it, fillScreen = false, PictureSource.Met) }
         }
         return null
     }
 
-    private suspend fun searchNasa(): List<Listing> = withContext(Dispatchers.IO) {
-        NASA_TOPICS.shuffled().take(2).flatMap { topic ->
-            orEmpty {
-                val query = URLEncoder.encode(topic, "UTF-8")
-                val page = (1..3).random()
-                val json = JSONObject(read("https://images-api.nasa.gov/search?q=$query&media_type=image&page_size=50&page=$page"))
-                val items = json.getJSONObject("collection").getJSONArray("items")
-                List(items.length()) { items.getJSONObject(it) }.mapNotNull(::nasaListing)
-            }
-        }.shuffled()
+    // The photos come from a list kept in the app (res/raw/chromecast_backgrounds.json), shuffled, all shown once
+    // before any repeats. The list only has photos whose links still worked when it was made; a few may have
+    // stopped since, so this tries a few in a row.
+    private suspend fun loadChromecast(): ScreensaverPicture? {
+        repeat(5) {
+            if (chromecastWaiting.isEmpty()) chromecastWaiting.addAll(chromecastPhotos().shuffled())
+            val exhibit = chromecastWaiting.removeFirstOrNull() ?: return null
+            download(exhibit.imageUrl)?.let { return ScreensaverPicture(exhibit, it, fillScreen = true, PictureSource.Chromecast) }
+        }
+        return null
     }
 
-    // Each item lists the same picture at several sizes. Picks the smallest that still fills the TV.
-    private fun nasaListing(item: JSONObject): Listing? {
-        val data = item.optJSONArray("data")?.optJSONObject(0) ?: return null
-        val links = item.optJSONArray("links") ?: return null
-        val sizes = List(links.length()) { links.getJSONObject(it) }
-            .filter { it.optString("render") == "image" && it.optInt("width") > 0 && it.optInt("height") > 0 }
-            .filter { it.optString("href").let { href -> href.endsWith(".jpg") || href.endsWith(".png") } }
-            .filter { it.optInt("size") <= MAX_FILE_BYTES }
-        val widest = sizes.maxByOrNull { it.optInt("width") } ?: return null
-        if (widest.optInt("width") < widest.optInt("height") * MIN_ASPECT) return null
-        val chosen = sizes.filter { it.optInt("width") >= SCREEN_WIDTH }.minByOrNull { it.optInt("width") } ?: widest
-        return Listing(
-            title = plainText(data.optString("title")).ifEmpty { return null },
-            description = shorten(plainText(data.optString("description"))),
-            imageUrl = chosen.getString("href"),
-        )
+    // From github.com/dconnolly/chromecast-backgrounds, each with the photographer's name when it's known.
+    private suspend fun chromecastPhotos(): List<Exhibit> = withContext(Dispatchers.IO) {
+        val text = context.resources.openRawResource(R.raw.chromecast_backgrounds).bufferedReader().use { it.readText() }
+        val photos = JSONArray(text)
+        List(photos.length()) { index ->
+            val photo = photos.getJSONObject(index)
+            val url = photo.getString("url")
+            Exhibit(
+                id = url,
+                title = "",
+                maker = photo.optString("author"),
+                makerDetail = "",
+                imageUrl = url,
+                smallImageUrl = url,
+                facts = emptyList(),
+                description = "",
+                summary = "",
+                footnote = "",
+            )
+        }
     }
 
     // A random stretch of a random search's results, since the search comes back in pages.
     private suspend fun searchMet(): List<Int> = withContext(Dispatchers.IO) {
-        orEmpty {
+        try {
             val (department, word) = MET_SEARCHES.random()
             val base = "https://collectionapi.metmuseum.org/public/collection/v1.1/search?hasImages=true&departmentId=$department&q=$word"
             val total = JSONObject(read("$base&limit=1")).optInt("total")
             val offset = (0 until maxOf(1, total - 50)).random()
             val ids = JSONObject(read("$base&limit=50&offset=$offset")).getJSONArray("objectIDs")
             List(ids.length()) { ids.getInt(it) }.shuffled()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
         }
-    }
-
-    // The caption is who made it, then when and what it's made of. The Met doesn't write descriptions.
-    private fun metCaption(artwork: Artwork): String {
-        val maker = if (artwork.artist.isNotEmpty() && artwork.artistBio.isNotEmpty()) {
-            "${artwork.artist} (${artwork.artistBio})"
-        } else {
-            artwork.maker
-        }
-        val details = listOf(artwork.date, artwork.medium).filter { it.isNotEmpty() }.joinToString(" · ")
-        return listOf(maker, details).filter { it.isNotEmpty() }.joinToString("\n")
     }
 
     private suspend fun download(url: String): ImageBitmap? = withContext(Dispatchers.IO) {
@@ -197,15 +188,6 @@ class ScreensaverPictures(private val source: () -> PictureSource) {
         }
     }
 
-    // A failed search just means nothing new this time; the next one tries again.
-    private inline fun <T> orEmpty(block: () -> List<T>): List<T> = try {
-        block()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        emptyList()
-    }
-
     private fun read(url: String): String {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
@@ -215,15 +197,5 @@ class ScreensaverPictures(private val source: () -> PictureSource) {
         } finally {
             connection.disconnect()
         }
-    }
-
-    // Descriptions sometimes carry HTML tags or entities.
-    private fun plainText(text: String): String =
-        Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY).toString().replace(Regex("\\s+"), " ").trim()
-
-    private fun shorten(text: String): String {
-        if (text.length <= DESCRIPTION_LENGTH) return text
-        val end = Regex("[.!?](\\s|$)").find(text, DESCRIPTION_LENGTH)?.range?.first ?: return text
-        return text.substring(0, end + 1)
     }
 }

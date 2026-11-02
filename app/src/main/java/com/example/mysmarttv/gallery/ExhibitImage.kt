@@ -1,4 +1,4 @@
-package com.example.mysmarttv.museum
+package com.example.mysmarttv.gallery
 
 import android.graphics.BitmapFactory
 import android.util.LruCache
@@ -50,7 +50,7 @@ private suspend fun download(url: String, maxSize: Int): ImageBitmap? = withCont
  * [placeholder] shows until it arrives.
  */
 @Composable
-fun ArtworkImage(
+fun ExhibitImage(
     url: String,
     modifier: Modifier = Modifier,
     maxSize: Int = 1600,
@@ -58,18 +58,23 @@ fun ArtworkImage(
     placeholder: String = "",
     placeholderColor: Color = Color.Gray,
 ) {
+    val shown = rememberExhibitBitmap(url, maxSize)
+    if (shown != null) {
+        Image(bitmap = shown, contentDescription = null, contentScale = contentScale, modifier = modifier)
+    } else {
+        Box(contentAlignment = Alignment.Center, modifier = modifier) {
+            Text(placeholder, fontSize = 18.sp, color = placeholderColor)
+        }
+    }
+}
+
+/** A piece's picture, downloaded when first asked for, or nothing until it arrives. */
+@Composable
+fun rememberExhibitBitmap(url: String, maxSize: Int = 1600): ImageBitmap? =
     // Started over for each new picture, so stepping to the next piece never shows the last one's picture.
     key(url, maxSize) {
         val picture by produceState(cache.get("$maxSize $url")) {
             if (value == null) value = download(url, maxSize)
         }
-        val shown = picture
-        if (shown != null) {
-            Image(bitmap = shown, contentDescription = null, contentScale = contentScale, modifier = modifier)
-        } else {
-            Box(contentAlignment = Alignment.Center, modifier = modifier) {
-                Text(placeholder, fontSize = 18.sp, color = placeholderColor)
-            }
-        }
+        picture
     }
-}

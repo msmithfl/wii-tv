@@ -28,6 +28,8 @@ class Sounds(context: Context) {
     private val appSelect: Int
     private val openMenu: Int
     private val goBack: Int
+    private val channelOpen: Int
+    private val channelClose: Int
 
     // SoundPool can't tell us when a sound ends, so read the startup sound's length up front.
     private val startupDurationMs: Long = context.resources.openRawResourceFd(R.raw.startup).use { file ->
@@ -54,6 +56,8 @@ class Sounds(context: Context) {
         appSelect = pool.load(context, R.raw.app_select, 1)
         openMenu = pool.load(context, R.raw.open_menu, 1)
         goBack = pool.load(context, R.raw.go_back, 1)
+        channelOpen = pool.load(context, R.raw.channel_open, 1)
+        channelClose = pool.load(context, R.raw.channel_close, 1)
     }
 
     /** Plays the startup sound, then runs [then] once it has finished. */
@@ -71,6 +75,11 @@ class Sounds(context: Context) {
 
     /** Any step back: leaving a screen, or closing the remove dialog without removing. */
     fun playBack() = play(goBack)
+
+    /** A channel's start screen growing in from the dashboard, and shrinking away again. */
+    fun playChannelOpen() = play(channelOpen)
+
+    fun playChannelClose() = play(channelClose)
 
     fun release() {
         handler.removeCallbacksAndMessages(null)
