@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -67,9 +69,17 @@ fun SettingsScreen(settings: AppSettings, sounds: Sounds, onBack: () -> Unit) {
     ) {
         Text(text = "Settings", fontSize = 34.sp, fontWeight = FontWeight.SemiBold, color = WiiDateText)
         Text(text = "Press OK to change a setting. Press Back to return.", fontSize = 16.sp, color = WiiClockText)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(20.dp))
 
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.width(620.dp)) {
+        // Scrolls once there are more rows than fit; moving onto a row off the bottom brings it into view.
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .width(620.dp)
+                .verticalScroll(rememberScrollState())
+                // Room inside the scrolling area, so a selected row's grown edge isn't cut off at the top and bottom.
+                .padding(vertical = 8.dp),
+        ) {
             SettingRow(
                 label = "Theme",
                 value = if (settings.darkMode) "Dark" else "Light",
